@@ -1,125 +1,177 @@
 import 'package:flutter/material.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/services.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'local_storage.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Hive and register the adapter.
+  await Hive.initFlutter();
+  Hive.registerAdapter(FormDataAdapter());
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Online/Offline Indicator',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
+        primarySwatch: Colors.blue,
+        visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const MyHomePage(),
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+  const MyHomePage({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  _MyHomePageState createState() => _MyHomePageState();
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+  final Connectivity _connectivity = Connectivity();
+  late Stream<ConnectivityResult> _connectivityStream;
+  ConnectivityResult _connectionStatus = ConnectivityResult.none;
 
-  void _incrementCounter() {
+  final TextEditingController _field1Controller = TextEditingController();
+  final TextEditingController _field2Controller = TextEditingController();
+
+  Box<FormData>? formDataBox;
+
+  @override
+  void initState() {
+    super.initState();
+    initConnectivity();
+    _connectivityStream = _connectivity.onConnectivityChanged;
+    _connectivityStream.listen(_updateConnectionStatus);
+    openHiveBox();
+  }
+
+  Future<void> openHiveBox() async {
+    formDataBox = await Hive.openBox<FormData>('formData');
+  }
+
+  void saveDataLocally() {
+    final formData = FormData()
+      ..field1 = _field1Controller.text
+      ..field2 = _field2Controller.text;
+
+    formDataBox?.add(formData);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Data saved locally!')),
+    );
+  }
+
+  Future<void> syncDataWithBackend() async {
+    if (_connectionStatus != ConnectivityResult.none) {
+      // Assume that we have a function `sendDataToBackend(FormData data)`
+      // that takes care of sending our saved form data to the backend.
+
+      final unsyncedData = formDataBox?.values.toList() ?? [];
+
+      for (var data in unsyncedData) {
+        try {
+          await sendDataToBackend(
+              data); // Implement this function based on your backend API.
+          await data
+              .delete(); // Remove from local storage after successful sync.
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Data synced with backend!')),
+          );
+        } catch (e) {
+          print('Failed to send data: $e');
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to sync data!')),
+          );
+        }
+      }
+    }
+  }
+
+  // Initialize connectivity status
+  Future<void> initConnectivity() async {
+    try {
+      var currentStatus = await _connectivity.checkConnectivity();
+      if (!mounted) return; // In case our widget was removed from the tree.
+      setState(() {
+        _connectionStatus = currentStatus;
+      });
+    } catch (e) {
+      print("Couldn't check connectivity status: $e");
+    }
+  }
+
+  void _updateConnectionStatus(ConnectivityResult result) {
+    if (!mounted) return; // In case our widget was removed from the tree.
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      _connectionStatus = result;
     });
+  }
+
+  sendDataToBackend(FormData data) {
+    print("Sending data to backend: $data");
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: const Text('My Offline-First App'),
+        backgroundColor: (_connectionStatus != ConnectivityResult.none)
+            ? Colors.green
+            : Colors.red, // For better contrast of AppBar items
+        actions: <Widget>[
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Center(
+              child: Text(
+                (_connectionStatus != ConnectivityResult.none)
+                    ? 'Online'
+                    : 'Offline',
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+          ),
+        ],
+        systemOverlayStyle: SystemUiOverlayStyle.light,
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
           children: <Widget>[
-            const Text(
-              'You have pushed the button this many times:',
+            TextField(
+              controller: _field1Controller,
+              decoration: const InputDecoration(labelText: 'Field One'),
             ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+            TextField(
+              controller: _field2Controller,
+              decoration: const InputDecoration(labelText: 'Field Two'),
             ),
+            ElevatedButton(
+              onPressed: (_connectionStatus != ConnectivityResult.none)
+                  ? () async {
+                      await syncDataWithBackend();
+                    }
+                  : saveDataLocally,
+              child: Text((_connectionStatus != ConnectivityResult.none)
+                  ? 'Submit'
+                  : 'Save Locally'),
+            ),
+            // The rest of your app content goes here.
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 }
