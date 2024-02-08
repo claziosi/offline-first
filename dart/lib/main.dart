@@ -1,3 +1,5 @@
+// ignore_for_file: use_build_context_synchronously
+
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -66,10 +68,12 @@ class _MyHomePageState extends State<MyHomePage> {
     openHiveBox();
   }
 
+  // Open the Hive box
   Future<void> openHiveBox() async {
     formDataBox = await Hive.openBox<FormData>('formData');
   }
 
+  // Save data locally
   void saveDataLocally() {
     final formData = FormData()
       ..field1 = _field1Controller.text
@@ -84,12 +88,14 @@ class _MyHomePageState extends State<MyHomePage> {
     clearFields();
   }
 
+  // Clear the text fields
   void clearFields() {
     _field1Controller.clear();
     _field2Controller.clear();
     _field3Controller.clear();
   }
 
+  // Sync data with backend
   Future<void> syncDataWithBackend() async {
     if (_isSyncing) return; // Prevent multiple sync attempts simultaneously
 
@@ -109,18 +115,20 @@ class _MyHomePageState extends State<MyHomePage> {
         _isSyncing = false;
       });
 
-      if (!unsyncedData.isEmpty)
+      if (unsyncedData.isNotEmpty) {
         clearFields(); // Clear fields only if there was something to sync
+      }
     }
   }
 
+  // Send data to backend
   Future<bool> sendDataToBackend(FormData data) async {
     // Simulate a delay for testing purposes
-    await Future.delayed(Duration(seconds: 2));
+    await Future.delayed(const Duration(seconds: 2));
 
     try {
       var response = await http.post(
-        Uri.parse('https://salvr.westeurope.cloudapp.azure.com/data/add'),
+        Uri.parse('https://API_BACKEND/data/add'),
         headers: <String, String>{
           'Content-Type': 'application/json; charset=UTF-8',
         },
@@ -132,20 +140,21 @@ class _MyHomePageState extends State<MyHomePage> {
       );
 
       if (response.statusCode == 201) {
-        print('Data sent to backend!');
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Data sent to backend!')),
+          // Show a snackbar with a message with the text field1 value
+          SnackBar(content: Text('Data sent successfully: ${data.field1}')),
         );
         return true;
       } else {
-        print('Failed to send data. Status code: ${response.statusCode}');
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Failed to send data!')),
         );
         return false;
       }
     } catch (e) {
-      print('Failed to send data due to exception: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to send data!')),
+      );
       return false;
     }
   }
