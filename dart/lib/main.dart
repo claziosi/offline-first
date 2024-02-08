@@ -1,8 +1,11 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'local_storage.dart';
+import 'package:http/http.dart' as http;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -42,8 +45,12 @@ class _MyHomePageState extends State<MyHomePage> {
   late Stream<ConnectivityResult> _connectivityStream;
   ConnectivityResult _connectionStatus = ConnectivityResult.none;
 
+  // Additional variable to track whether we're currently syncing
+  bool _isSyncing = false;
+
   final TextEditingController _field1Controller = TextEditingController();
   final TextEditingController _field2Controller = TextEditingController();
+  final TextEditingController _field3Controller = TextEditingController();
 
   Box<FormData>? formDataBox;
 
@@ -52,7 +59,10 @@ class _MyHomePageState extends State<MyHomePage> {
     super.initState();
     initConnectivity();
     _connectivityStream = _connectivity.onConnectivityChanged;
-    _connectivityStream.listen(_updateConnectionStatus);
+    _connectivityStream.listen((ConnectivityResult result) {
+      // We pass context here assuming that this callback is only called while the widget is still mounted
+      _updateConnectionStatus(result, context);
+    });
     openHiveBox();
   }
 
@@ -63,37 +73,113 @@ class _MyHomePageState extends State<MyHomePage> {
   void saveDataLocally() {
     final formData = FormData()
       ..field1 = _field1Controller.text
-      ..field2 = _field2Controller.text;
+      ..field2 = _field2Controller.text
+      ..field3 = _field3Controller.text;
 
     formDataBox?.add(formData);
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Data saved locally!')),
     );
+    clearFields();
+  }
+
+  void clearFields() {
+    _field1Controller.clear();
+    _field2Controller.clear();
+    _field3Controller.clear();
   }
 
   Future<void> syncDataWithBackend() async {
+    if (_isSyncing) return; // Prevent multiple sync attempts simultaneously
+
     if (_connectionStatus != ConnectivityResult.none) {
-      // Assume that we have a function `sendDataToBackend(FormData data)`
-      // that takes care of sending our saved form data to the backend.
+      setState(() {
+        _isSyncing = true;
+      });
 
       final unsyncedData = formDataBox?.values.toList() ?? [];
 
       for (var data in unsyncedData) {
-        try {
-          await sendDataToBackend(
-              data); // Implement this function based on your backend API.
-          await data
-              .delete(); // Remove from local storage after successful sync.
+        await sendDataToBackend(data);
+        await data.delete(); // Remove from local storage after successful sync.
+      }
 
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Data synced with backend!')),
-          );
-        } catch (e) {
-          print('Failed to send data: $e');
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to sync data!')),
-          );
+      setState(() {
+        _isSyncing = false;
+      });
+
+      if (!unsyncedData.isEmpty)
+        clearFields(); // Clear fields only if there was something to sync
+    }
+  }
+
+  Future<bool> sendDataToBackend(FormData data) async {
+    // Simulate a delay for testing purposes
+    await Future.delayed(Duration(seconds: 2));
+
+    try {
+      var response = await http.post(
+        Uri.parse('https://salvr.westeurope.cloudapp.azure.com/data/add'),
+        headers: <String, String>{
+          'Content-Type': 'application/json; charset=UTF-8',
+        },
+        body: jsonEncode(<String, String>{
+          'field1': data.field1,
+          'field2': data.field2,
+          'field3': data.field3,
+        }),
+      );
+
+      if (response.statusCode == 201) {
+        print('Data sent to backend!');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Data sent to backend!')),
+        );
+        return true;
+      } else {
+        print('Failed to send data. Status code: ${response.statusCode}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to send data!')),
+        );
+        return false;
+      }
+    } catch (e) {
+      print('Failed to send data due to exception: $e');
+      return false;
+    }
+  }
+
+  void handleSubmit() async {
+    final formData = FormData()
+      ..field1 = _field1Controller.text
+      ..field2 = _field2Controller.text
+      ..field3 = _field3Controller.text;
+
+    if (_connectionStatus != ConnectivityResult.none) {
+      bool success = await sendDataToBackend(formData);
+      if (success) clearFields(); // Only clear fields on successful send
+    } else {
+      formDataBox?.add(formData); // Save locally if offline
+      clearFields(); // Clear fields after saving locally
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No connection. Data saved locally!')),
+      );
+    }
+  }
+
+  void _updateConnectionStatus(
+      ConnectivityResult result, BuildContext context) async {
+    setState(() => _connectionStatus = result);
+
+    if (result != ConnectivityResult.none && formDataBox != null) {
+      final unsyncedData = formDataBox!.values.toList();
+
+      for (var formData in unsyncedData) {
+        bool success = await sendDataToBackend(formData);
+        if (success) {
+          await formData
+              .delete(); // Remove from local storage after successful sync.
         }
       }
     }
@@ -110,17 +196,6 @@ class _MyHomePageState extends State<MyHomePage> {
     } catch (e) {
       print("Couldn't check connectivity status: $e");
     }
-  }
-
-  void _updateConnectionStatus(ConnectivityResult result) {
-    if (!mounted) return; // In case our widget was removed from the tree.
-    setState(() {
-      _connectionStatus = result;
-    });
-  }
-
-  sendDataToBackend(FormData data) {
-    print("Sending data to backend: $data");
   }
 
   @override
@@ -152,22 +227,30 @@ class _MyHomePageState extends State<MyHomePage> {
           children: <Widget>[
             TextField(
               controller: _field1Controller,
-              decoration: const InputDecoration(labelText: 'Field One'),
+              decoration: const InputDecoration(labelText: 'Name'),
             ),
             TextField(
               controller: _field2Controller,
-              decoration: const InputDecoration(labelText: 'Field Two'),
+              decoration: const InputDecoration(labelText: 'Title'),
             ),
+            //Text area with 4 lines
+            TextField(
+              controller: _field3Controller,
+              maxLines: 4,
+              decoration: const InputDecoration(labelText: 'Description'),
+            ),
+            // Add a margin-down to create some space between the fields and the button
+            const SizedBox(height: 24),
+
             ElevatedButton(
               onPressed: (_connectionStatus != ConnectivityResult.none)
-                  ? () async {
-                      await syncDataWithBackend();
-                    }
-                  : saveDataLocally,
+                  ? handleSubmit // Call handleSubmit when online
+                  : saveDataLocally, // Call saveDataLocally when offline
               child: Text((_connectionStatus != ConnectivityResult.none)
                   ? 'Submit'
                   : 'Save Locally'),
             ),
+
             // The rest of your app content goes here.
           ],
         ),

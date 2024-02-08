@@ -18,17 +18,20 @@ class FormDataAdapter extends TypeAdapter<FormData> {
     };
     return FormData()
       ..field1 = fields[0] as String
-      ..field2 = fields[1] as String;
+      ..field2 = fields[1] as String
+      ..field3 = fields[2] as String;
   }
 
   @override
   void write(BinaryWriter writer, FormData obj) {
     writer
-      ..writeByte(2)
+      ..writeByte(3)
       ..writeByte(0)
       ..write(obj.field1)
       ..writeByte(1)
-      ..write(obj.field2);
+      ..write(obj.field2)
+      ..writeByte(2)
+      ..write(obj.field3);
   }
 
   @override

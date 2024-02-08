@@ -10,4 +10,7 @@ class FormData extends HiveObject {
 
   @HiveField(1)
   late String field2;
+
+  @HiveField(2)
+  late String field3;
 }
