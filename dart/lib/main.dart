@@ -5,11 +5,13 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'local_storage.dart';
 import 'package:http/http.dart' as http;
 
 Future<void> main() async {
+  await dotenv.load(fileName: ".env");
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize Hive and register the adapter.
@@ -128,8 +130,9 @@ class _MyHomePageState extends State<MyHomePage> {
 
     try {
       var response = await http.post(
-        Uri.parse('https://API_BACKEND/data/add'),
+        Uri.parse('http://localhost:8080/data/add'),
         headers: <String, String>{
+          'Authorization': 'Bearer ${dotenv.env['TOKEN']}',
           'Content-Type': 'application/json; charset=UTF-8',
         },
         body: jsonEncode(<String, String>{
